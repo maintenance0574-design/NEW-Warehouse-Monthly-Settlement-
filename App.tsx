@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Transaction, TransactionType } from './types';
 import TransactionForm from './components/TransactionForm';
 import RepairForm from './components/RepairForm';
@@ -14,6 +14,7 @@ const getTaipeiDate = (dateInput?: string | Date): string => {
 };
 
 const ITEMS_PER_PAGE = 15;
+const INACTIVITY_LIMIT = 5 * 60 * 1000; // 5 分鐘 (毫秒)
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('wms_current_user'));
@@ -43,6 +44,44 @@ const App: React.FC = () => {
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
+  // 逾時計時器參考
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleLogout = useCallback(() => {
+    sessionStorage.clear();
+    localStorage.removeItem('wms_cache_data');
+    localStorage.removeItem('ui_active_tab');
+    setCurrentUser(null);
+    setTransactions([]);
+    setShowLogoutConfirm(false);
+    setActiveTab('dashboard');
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
+
+  // 自動登出計時邏輯
+  const resetInactivityTimer = useCallback(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (currentUser) {
+      timeoutRef.current = setTimeout(() => {
+        handleLogout();
+        alert('由於您已超過 5 分鐘未操作，系統已自動登出以保護資料安全。');
+      }, INACTIVITY_LIMIT);
+    }
+  }, [currentUser, handleLogout]);
+
+  useEffect(() => {
+    if (currentUser) {
+      const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+      events.forEach(event => window.addEventListener(event, resetInactivityTimer));
+      resetInactivityTimer(); // 初始化計時
+
+      return () => {
+        events.forEach(event => window.removeEventListener(event, resetInactivityTimer));
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      };
+    }
+  }, [currentUser, resetInactivityTimer]);
+
   const loadData = useCallback(async () => {
     if (!currentUser) return;
     setIsSyncing(true);
@@ -66,16 +105,6 @@ const App: React.FC = () => {
       loadData();
     }
   }, [currentUser, loadData]);
-
-  const handleLogout = useCallback(() => {
-    sessionStorage.clear();
-    localStorage.removeItem('wms_cache_data');
-    localStorage.removeItem('ui_active_tab');
-    setCurrentUser(null);
-    setTransactions([]);
-    setShowLogoutConfirm(false);
-    setActiveTab('dashboard');
-  }, []);
 
   const isRepairs = activeTab === 'repairs';
   const isRecords = activeTab === 'records';
