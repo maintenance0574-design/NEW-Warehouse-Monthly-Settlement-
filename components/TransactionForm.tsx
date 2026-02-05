@@ -21,7 +21,7 @@ const TransactionForm: React.FC<Props> = ({ onSave, initialData, onCancel, title
   
   const [formData, setFormData] = useState({
     date: getTaipeiToday(),
-    type: TransactionType.USAGE,
+    type: TransactionType.INBOUND, // 預設改為進貨
     accountCategory: ACCOUNT_CATEGORIES[0],
     materialName: '',
     materialNumber: '',
@@ -40,7 +40,7 @@ const TransactionForm: React.FC<Props> = ({ onSave, initialData, onCancel, title
     if (initialData) {
       setFormData({
         date: initialData.date || getTaipeiToday(),
-        type: initialData.type === TransactionType.REPAIR ? TransactionType.USAGE : initialData.type,
+        type: initialData.type,
         accountCategory: initialData.accountCategory || ACCOUNT_CATEGORIES[0],
         materialName: String(initialData.materialName || ''),
         materialNumber: String(initialData.materialNumber || ''),
@@ -143,9 +143,8 @@ const TransactionForm: React.FC<Props> = ({ onSave, initialData, onCancel, title
           <div>
             <label className={labelClasses}>紀錄類別</label>
             <select className={`${inputClasses} text-lg font-black text-indigo-700 h-[52px]`} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}>
-              <option value={TransactionType.USAGE}>{TransactionType.USAGE}</option>
               <option value={TransactionType.INBOUND}>{TransactionType.INBOUND}</option>
-              <option value={TransactionType.CONSTRUCTION}>{TransactionType.CONSTRUCTION}</option>
+              {/* 移除用料與建置 */}
             </select>
           </div>
           <div>

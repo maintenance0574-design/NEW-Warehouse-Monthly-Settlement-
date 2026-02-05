@@ -17,7 +17,7 @@ const BatchAddForm: React.FC<Props> = ({ onBatchSave, existingTransactions, onCo
     {
       id: Math.random().toString(36).substr(2, 9),
       date: getTaipeiToday(),
-      type: TransactionType.USAGE,
+      type: TransactionType.INBOUND, // 預設改為進貨
       accountCategory: 'A', 
       materialName: '',
       materialNumber: '',
@@ -187,7 +187,8 @@ const BatchAddForm: React.FC<Props> = ({ onBatchSave, existingTransactions, onCo
                   <div className="flex gap-2">
                     <div className="flex-1"><input type="date" value={row.date} onChange={e => updateRow(idx, 'date', e.target.value)} className={inputClass} /></div>
                     <div className="w-28"><select value={row.type} onChange={e => updateRow(idx, 'type', e.target.value)} className={`${inputClass} text-indigo-600`}>
-                      {Object.values(TransactionType).map(t => <option key={t} value={t}>{t}</option>)}
+                      <option value={TransactionType.INBOUND}>{TransactionType.INBOUND}</option>
+                      <option value={TransactionType.REPAIR}>{TransactionType.REPAIR}</option>
                     </select></div>
                   </div>
                 </div>

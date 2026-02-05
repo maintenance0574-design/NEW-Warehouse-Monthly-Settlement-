@@ -29,7 +29,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending_inbound' | 'scrapped' | 'repairing'>('all');
-  const [recordCategoryFilter, setRecordCategoryFilter] = useState<'all' | TransactionType.INBOUND | TransactionType.USAGE | TransactionType.CONSTRUCTION>('all');
+  const [recordCategoryFilter, setRecordCategoryFilter] = useState<'all' | TransactionType.INBOUND>('all');
   const [viewScope, setViewScope] = useState<'monthly' | 'all'>('monthly');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -165,8 +165,6 @@ const App: React.FC = () => {
             <select value={recordCategoryFilter} onChange={e => {setRecordCategoryFilter(e.target.value as any); setCurrentPage(1);}} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black outline-none text-slate-600 focus:border-indigo-500 shadow-sm h-[42px]">
               <option value="all">所有類別</option>
               <option value={TransactionType.INBOUND}>📦 進貨</option>
-              <option value={TransactionType.USAGE}>🔧 用料</option>
-              <option value={TransactionType.CONSTRUCTION}>🏗️ 建置</option>
             </select>
           )}
         </div>
