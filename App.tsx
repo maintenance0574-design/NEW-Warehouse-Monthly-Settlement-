@@ -7,6 +7,7 @@ import BatchAddForm from './components/BatchAddForm';
 import Dashboard from './components/Dashboard';
 import LoginScreen from './components/LoginScreen';
 import { dbService } from './services/dbService';
+import { exportToExcel } from './services/reportService';
 
 const getTaipeiDate = (dateInput?: string | Date): string => {
   const d = dateInput ? new Date(dateInput) : new Date();
@@ -30,7 +31,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending_inbound' | 'scrapped' | 'repairing'>('all');
-  const [recordCategoryFilter, setRecordCategoryFilter] = useState<'all' | TransactionType.INBOUND>('all');
+  const [recordCategoryFilter, setRecordCategoryFilter] = useState<'all' | TransactionType.INBOUND | TransactionType.USAGE | TransactionType.CONSTRUCTION>('all');
   const [viewScope, setViewScope] = useState<'monthly' | 'all'>('monthly');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -43,9 +44,15 @@ const App: React.FC = () => {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  
+  // 匯出報表相關狀態
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportConfig, setExportConfig] = useState({
+    year: String(new Date().getFullYear()),
+    month: String(new Date().getMonth() + 1).padStart(2, '0')
+  });
 
-  // 逾時計時器參考
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleLogout = useCallback(() => {
     sessionStorage.clear();
@@ -58,7 +65,6 @@ const App: React.FC = () => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }, []);
 
-  // 自動登出計時邏輯
   const resetInactivityTimer = useCallback(() => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (currentUser) {
@@ -73,8 +79,7 @@ const App: React.FC = () => {
     if (currentUser) {
       const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
       events.forEach(event => window.addEventListener(event, resetInactivityTimer));
-      resetInactivityTimer(); // 初始化計時
-
+      resetInactivityTimer();
       return () => {
         events.forEach(event => window.removeEventListener(event, resetInactivityTimer));
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -105,6 +110,17 @@ const App: React.FC = () => {
       loadData();
     }
   }, [currentUser, loadData]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    const currentYear = new Date().getFullYear();
+    years.add(String(currentYear));
+    transactions.forEach(t => {
+      const y = t.date.split('-')[0];
+      if (y && y.length === 4) years.add(y);
+    });
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [transactions]);
 
   const isRepairs = activeTab === 'repairs';
   const isRecords = activeTab === 'records';
@@ -163,40 +179,78 @@ const App: React.FC = () => {
     }
   };
 
+  // 報表導出處理
+  const performExport = (mode: 'current' | 'custom') => {
+    let exportData = [];
+    let fileName = '';
+
+    if (mode === 'current') {
+      exportData = filteredList;
+      fileName = isRepairs ? '當前維修搜尋結果' : '當前核銷搜尋結果';
+    } else {
+      const yearMonth = `${exportConfig.year}-${exportConfig.month}`;
+      exportData = transactions.filter(t => {
+        const matchesDate = t.date.startsWith(yearMonth);
+        const matchesTab = isRepairs ? t.type === TransactionType.REPAIR : t.type !== TransactionType.REPAIR;
+        return matchesDate && matchesTab;
+      });
+      fileName = isRepairs ? `倉儲維修報表_${exportConfig.year}_${exportConfig.month}` : `倉儲核銷報表_${exportConfig.year}_${exportConfig.month}`;
+    }
+
+    if (exportData.length === 0) {
+      alert('⚠️ 此範圍內暫無資料可供導出');
+      return;
+    }
+
+    exportToExcel(exportData, fileName);
+    setIsExportModalOpen(false);
+  };
+
   const renderFilterHeader = () => (
     <div className="p-6 lg:p-8 border-b border-slate-100 flex flex-col gap-6 bg-white">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="bg-slate-100 p-1 rounded-xl flex shadow-inner shrink-0">
-          <button onClick={() => {setViewScope('monthly'); setCurrentPage(1);}} className={`px-4 py-2 text-xs font-black rounded-lg transition-all ${viewScope === 'monthly' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>最新 10 筆</button>
-          <button onClick={() => {setViewScope('all'); setCurrentPage(1);}} className={`px-4 py-2 text-xs font-black rounded-lg transition-all ${viewScope === 'all' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>全部紀錄</button>
-        </div>
-        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm shrink-0">
-          <span className="text-sm">📅</span>
-          <div className="flex items-center gap-2">
-            <input type="date" value={startDate} onChange={e => {setStartDate(e.target.value); setCurrentPage(1);}} className="bg-transparent text-xs font-black text-indigo-600 outline-none cursor-pointer p-0.5" />
-            <span className="text-slate-300 text-[10px] font-black uppercase">至</span>
-            <input type="date" value={endDate} onChange={e => {setEndDate(e.target.value); setCurrentPage(1);}} className="bg-transparent text-xs font-black text-indigo-600 outline-none cursor-pointer p-0.5" />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="bg-slate-100 p-1 rounded-xl flex shadow-inner shrink-0">
+            <button onClick={() => {setViewScope('monthly'); setCurrentPage(1);}} className={`px-4 py-2 text-xs font-black rounded-lg transition-all ${viewScope === 'monthly' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>最新 10 筆</button>
+            <button onClick={() => {setViewScope('all'); setCurrentPage(1);}} className={`px-4 py-2 text-xs font-black rounded-lg transition-all ${viewScope === 'all' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>全部紀錄</button>
           </div>
-          {(startDate || endDate) && <button onClick={() => {setStartDate(''); setEndDate(''); setSelectedRepairMaterial(null);}} className="ml-1 text-slate-300 hover:text-rose-500 transition-colors">✕</button>}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <select value={statusFilter} onChange={e => {setStatusFilter(e.target.value as any); setCurrentPage(1);}} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black outline-none text-slate-600 focus:border-indigo-500 shadow-sm h-[42px] min-w-[120px]">
-            <option value="all">全部狀態</option>
-            {isRecords && <option value="pending_inbound">⏳ 尚未收貨</option>}
-            {isRepairs && (
-              <>
-                <option value="scrapped">💀 僅報廢</option>
-                <option value="repairing">🛠️ 維修中</option>
-              </>
-            )}
-          </select>
-          {isRecords && (
-            <select value={recordCategoryFilter} onChange={e => {setRecordCategoryFilter(e.target.value as any); setCurrentPage(1);}} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black outline-none text-slate-600 focus:border-indigo-500 shadow-sm h-[42px]">
-              <option value="all">所有類別</option>
-              <option value={TransactionType.INBOUND}>📦 進貨</option>
+          <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm shrink-0">
+            <span className="text-sm">📅</span>
+            <div className="flex items-center gap-2">
+              <input type="date" value={startDate} onChange={e => {setStartDate(e.target.value); setCurrentPage(1);}} className="bg-transparent text-xs font-black text-indigo-600 outline-none cursor-pointer p-0.5" />
+              <span className="text-slate-300 text-[10px] font-black uppercase">至</span>
+              <input type="date" value={endDate} onChange={e => {setEndDate(e.target.value); setCurrentPage(1);}} className="bg-transparent text-xs font-black text-indigo-600 outline-none cursor-pointer p-0.5" />
+            </div>
+            {(startDate || endDate) && <button onClick={() => {setStartDate(''); setEndDate(''); setSelectedRepairMaterial(null);}} className="ml-1 text-slate-300 hover:text-rose-500 transition-colors">✕</button>}
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <select value={statusFilter} onChange={e => {setStatusFilter(e.target.value as any); setCurrentPage(1);}} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black outline-none text-slate-600 focus:border-indigo-500 shadow-sm h-[42px] min-w-[120px]">
+              <option value="all">全部狀態</option>
+              {isRecords && <option value="pending_inbound">⏳ 尚未收貨</option>}
+              {isRepairs && (
+                <>
+                  <option value="scrapped">💀 僅報廢</option>
+                  <option value="repairing">🛠️ 維修中</option>
+                </>
+              )}
             </select>
-          )}
+            {isRecords && (
+              <select value={recordCategoryFilter} onChange={e => {setRecordCategoryFilter(e.target.value as any); setCurrentPage(1);}} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black outline-none text-slate-600 focus:border-indigo-500 shadow-sm h-[42px]">
+                <option value="all">所有類別</option>
+                <option value={TransactionType.INBOUND}>📦 進貨</option>
+                <option value={TransactionType.USAGE}>🛠️ 用料</option>
+                <option value={TransactionType.CONSTRUCTION}>🏗️ 建置</option>
+              </select>
+            )}
+          </div>
         </div>
+
+        <button 
+          onClick={() => setIsExportModalOpen(true)}
+          className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-xs shadow-lg hover:bg-indigo-600 active:scale-95 transition-all shrink-0"
+        >
+          <span>📥</span> 匯出 Excel 報表
+        </button>
       </div>
       <div className="relative">
         <input type="text" placeholder="搜尋料件、PN、SN 或機台編號..." value={keywordSearch} onChange={e => {setKeywordSearch(e.target.value); setCurrentPage(1);}} className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/5 outline-none focus:border-indigo-500 shadow-sm transition-all" />
@@ -411,6 +465,85 @@ const App: React.FC = () => {
           <BatchAddForm onBatchSave={async txList => { const s = await dbService.batchSave(txList); if(s) await loadData(); return s; }} existingTransactions={transactions} onComplete={() => setActiveTab('records')} currentUser={currentUser!} />
         )}
       </main>
+
+      {/* 匯出報表彈窗 (Export Modal) */}
+      {isExportModalOpen && (
+        <div className="fixed inset-0 z-[800] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white rounded-[3rem] w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
+            <div className="bg-slate-900 p-8 text-center relative">
+              <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4 shadow-lg">📋</div>
+              <h3 className="text-xl font-black text-white">報表導出中心</h3>
+              <p className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2">Warehouse Report Generation</p>
+              <button onClick={() => setIsExportModalOpen(false)} className="absolute top-6 right-8 text-slate-500 hover:text-white transition-colors">✕</button>
+            </div>
+            
+            <div className="p-10 space-y-8">
+              {/* 指定年份月份匯出 */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="w-1.5 h-4 bg-indigo-600 rounded-full"></span>
+                  <label className="text-sm font-black text-slate-900 uppercase tracking-widest">匯出指定月份資料</label>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-black text-slate-400 ml-1">年份</p>
+                    <select 
+                      value={exportConfig.year} 
+                      onChange={e => setExportConfig({...exportConfig, year: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black text-slate-900 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all"
+                    >
+                      {availableYears.map(y => <option key={y} value={y}>{y} 年</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-black text-slate-400 ml-1">月份</p>
+                    <select 
+                      value={exportConfig.month} 
+                      onChange={e => setExportConfig({...exportConfig, month: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black text-slate-900 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const m = String(i + 1).padStart(2, '0');
+                        return <option key={m} value={m}>{m} 月</option>;
+                      })}
+                    </select>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => performExport('custom')}
+                  className="w-full py-4.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3"
+                >
+                  📥 匯出 {exportConfig.year} 年 {exportConfig.month} 月報表
+                </button>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
+                <div className="relative flex justify-center text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]"><span className="bg-white px-4">OR</span></div>
+              </div>
+
+              {/* 匯出當前搜尋結果 */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="w-1.5 h-4 bg-slate-400 rounded-full"></span>
+                  <label className="text-sm font-black text-slate-900 uppercase tracking-widest">當前搜尋範圍</label>
+                </div>
+                <p className="text-xs font-bold text-slate-400 leading-relaxed px-1">將匯出您目前在畫面上看到的搜尋結果（共 {filteredList.length} 筆資料）。</p>
+                <button 
+                  onClick={() => performExport('current')}
+                  className="w-full py-4.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-sm shadow-xl active:scale-95 transition-all"
+                >
+                  🔍 匯出當前篩選結果
+                </button>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 p-6 text-center border-t border-slate-100">
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Secure Export Protocol • XLSX Format</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       {pendingDelete && (
